@@ -294,13 +294,15 @@ void init_array(nb::module_& m) {
       nb::is_weak_referenceable())
       .def(
           "__init__",
-          [](mx::array* aptr, nb::object v, std::optional<mx::Dtype> t) {
-            new (aptr) mx::array(create_array(v, t));
-          },
+          [](mx::array* aptr,
+             nb::object v,
+             std::optional<mx::Dtype> t,
+             bool copy) { new (aptr) mx::array(create_array(v, t, copy)); },
           "val"_a,
           "dtype"_a = nb::none(),
+          "copy"_a = true,
           nb::sig(
-              "def __init__(self: array, val: Union[scalar, list, tuple, DLPackCompatible, array], dtype: Optional[Dtype] = None)"))
+              "def __init__(self: array, val: Union[scalar, list, tuple, DLPackCompatible, array], dtype: Optional[Dtype] = None, copy: bool = True)"))
       .def_prop_ro(
           "size",
           &mx::array::size,

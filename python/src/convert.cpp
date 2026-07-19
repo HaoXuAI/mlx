@@ -42,10 +42,46 @@ mx::array nd_array_to_mlx_contiguous(
   return mx::array(static_cast<const T*>(data_ptr), shape, dtype);
 }
 
+// Map a nanobind dtype to the identical-width MLX dtype that needs no
+// conversion. Returns nullopt for types that require a converting copy
+// (e.g. float64 -> float32, complex128 -> complex64), which cannot be adopted
+// zero-copy.
+static std::optional<mx::Dtype> identical_mlx_dtype(nb::dlpack::dtype type) {
+  if (type == nb::dtype<bool>())
+    return mx::bool_;
+  if (type == nb::dtype<uint8_t>())
+    return mx::uint8;
+  if (type == nb::dtype<uint16_t>())
+    return mx::uint16;
+  if (type == nb::dtype<uint32_t>())
+    return mx::uint32;
+  if (type == nb::dtype<uint64_t>())
+    return mx::uint64;
+  if (type == nb::dtype<int8_t>())
+    return mx::int8;
+  if (type == nb::dtype<int16_t>())
+    return mx::int16;
+  if (type == nb::dtype<int32_t>())
+    return mx::int32;
+  if (type == nb::dtype<int64_t>())
+    return mx::int64;
+  if (type == nb::dtype<mx::float16_t>())
+    return mx::float16;
+  if (type == nb::dtype<mx::bfloat16_t>())
+    return mx::bfloat16;
+  if (type == nb::dtype<float>())
+    return mx::float32;
+  if (type == nb::dtype<std::complex<float>>())
+    return mx::complex64;
+  return std::nullopt;
+}
+
 mx::array nd_array_to_mlx(
     nb::ndarray<nb::ro, nb::c_contig> nd_array,
     std::optional<mx::Dtype> dtype,
-    std::optional<nb::dlpack::dtype> nb_dtype) {
+    std::optional<nb::dlpack::dtype> nb_dtype,
+    bool copy,
+    nb::handle owner) {
   if (nd_array.device_type() != nb::device::cpu::value) {
     throw std::invalid_argument(
         "Cannot convert non-CPU DLPack array to mlx array.");
@@ -58,6 +94,26 @@ mx::array nd_array_to_mlx(
     shape.push_back(check_shape_dim(nd_array.shape(i)));
   }
   auto type = nb_dtype.value_or(nd_array.dtype());
+
+  // Zero-copy path: adopt the CPU buffer instead of copying it. Only valid when
+  // no dtype conversion is required. On unified memory, mx::array(void*, ...)
+  // wraps the external pointer via Metal's newBufferWithBytesNoCopy and
+  // transparently falls back to a copy if the pointer is not page-aligned. The
+  // deleter holds a reference to the source buffer for the lifetime of the
+  // adopted array so its memory is not freed out from under MLX.
+  if (!copy && owner.ptr() != nullptr) {
+    auto native = identical_mlx_dtype(type);
+    if (native && (!dtype || *dtype == *native)) {
+      PyObject* keep = owner.ptr();
+      Py_XINCREF(keep);
+      return mx::array(
+          const_cast<void*>(nd_array.data()), shape, *native, [keep](void*) {
+            nb::gil_scoped_acquire gil;
+            Py_XDECREF(keep);
+          });
+    }
+    // Otherwise fall through and copy (a dtype conversion is needed).
+  }
 
   // Copy data and make array
   if (type == nb::dtype<bool>()) {
@@ -471,7 +527,7 @@ mx::array array_from_list(nb::tuple pl, std::optional<mx::Dtype> dtype) {
   return array_from_list_impl(pl, dtype);
 }
 
-mx::array create_array(nb::object v, std::optional<mx::Dtype> t) {
+mx::array create_array(nb::object v, std::optional<mx::Dtype> t, bool copy) {
   if (nb::isinstance<nb::bool_>(v)) {
     return mx::array(nb::cast<bool>(v), t.value_or(mx::bool_));
   } else if (nb::isinstance<nb::int_>(v)) {
@@ -511,7 +567,7 @@ mx::array create_array(nb::object v, std::optional<mx::Dtype> t) {
     } else {
       nd = nb::cast<ContigArray>(v);
     }
-    return nd_array_to_mlx(nd, t, nb_dtype);
+    return nd_array_to_mlx(nd, t, nb_dtype, copy, v);
   } else {
     auto arr = to_array_with_accessor(v);
     return mx::astype(arr, t.value_or(arr.dtype()));

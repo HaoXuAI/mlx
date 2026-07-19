@@ -64,7 +64,9 @@ struct ArrayLike {
 mx::array nd_array_to_mlx(
     nb::ndarray<nb::ro, nb::c_contig> nd_array,
     std::optional<mx::Dtype> mx_dtype,
-    std::optional<nb::dlpack::dtype> nb_dtype = std::nullopt);
+    std::optional<nb::dlpack::dtype> nb_dtype = std::nullopt,
+    bool copy = true,
+    nb::handle owner = nb::handle());
 
 nb::ndarray<nb::numpy> mlx_to_np_array(const mx::array& a);
 nb::ndarray<> mlx_to_dlpack(const mx::array& a);
@@ -73,7 +75,8 @@ nb::object to_scalar(mx::array& a);
 
 nb::object tolist(mx::array& a);
 
-mx::array create_array(nb::object v, std::optional<mx::Dtype> t);
+mx::array
+create_array(nb::object v, std::optional<mx::Dtype> t, bool copy = true);
 mx::array array_from_list(nb::list pl, std::optional<mx::Dtype> dtype);
 mx::array array_from_list(nb::tuple pl, std::optional<mx::Dtype> dtype);
 
