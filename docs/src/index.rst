@@ -97,4 +97,5 @@ are the CPU and GPU.
    dev/metal_debugger
    dev/metal_logging
    dev/custom_metal_kernels
+   dev/custom_cuda_kernels
    dev/mlx_in_cpp
